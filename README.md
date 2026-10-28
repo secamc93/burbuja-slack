@@ -21,6 +21,8 @@ Proyecto hermano de [burbuja-wa](https://github.com/secamc93/burbuja-wa) (WhatsA
   - Botones: alejar, acercar, recargar, siempre encima, minimizar, maximizar, ocultar.
   - Recuerda posición, tamaño, zoom y "siempre encima".
 - Límite de memoria de WebKit (`MEMORIA_MB`, 1 GB): pasado ese uso libera memoria.
+- Reciclado: si la página pasa de `RECICLAR_MB` (900 MB) tras `REPOSO_MIN` (10) minutos
+  sin usar el chat, se recarga en un proceso nuevo (no con audio o llamada en curso).
 - Notificaciones de escritorio, micrófono y cámara, descargas a `~/Descargas`.
 - Pegar imágenes con `Ctrl+V` o clic derecho > Pegar imagen (WebKitGTK no lo hace solo).
 - Los enlaces de los mensajes se abren en el navegador; el inicio de sesión
