@@ -36,6 +36,7 @@ SEPARACION = 10           # entre la burbuja y el chat
 MARGEN = 20               # posición inicial respecto a la esquina
 BORDE = 4                 # grosor del borde para redimensionar el chat
 RADIO = 28                # esquinas redondeadas del chat
+MEMORIA_MB = 1024         # sobre este uso WebKit libera memoria a la fuerza (no mata la página)
 ZOOM = 1.0                # zoom inicial de Slack (Ctrl +/- lo cambia y se recuerda)
 URL = "https://app.slack.com/client"
 # Slack rechaza el WebKit que se presenta como Safari: se presenta como un Chrome
@@ -47,15 +48,23 @@ UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 CONFIG = Path.home() / ".config/burbuja-slack"
 DATOS = Path.home() / ".local/share/burbuja-slack"
 ESTADO = CONFIG / "estado.json"
-# Pega una imagen (PNG en base64) en el elemento activo de Slack.
+# Pega una imagen (PNG en base64) en el cuadro de mensaje activo de Slack. Si la
+# página no atiende el pegado, la sube por el selector de archivos.
 PEGAR_JS = """(function (b64) {
   const bin = atob(b64), bytes = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const archivo = new File([bytes], "imagen.png", {type: "image/png"});
   const dt = new DataTransfer();
-  dt.items.add(new File([bytes], "imagen.png", {type: "image/png"}));
+  dt.items.add(archivo);
   const destino = document.activeElement || document.body;
-  destino.dispatchEvent(new ClipboardEvent("paste",
-    {clipboardData: dt, bubbles: true, cancelable: true}));
+  const ev = new ClipboardEvent("paste", {clipboardData: dt, bubbles: true, cancelable: true});
+  if (destino.dispatchEvent(ev)) {
+    const input = document.querySelector('input[type=file]');
+    if (input) {
+      input.files = dt.files;
+      input.dispatchEvent(new Event("change", {bubbles: true}));
+    }
+  }
 })(%s);"""
 ASSETS = Path(__file__).resolve().parent / "assets"
 LOGO = ASSETS / "slack.svg"           # logo de Slack en blanco (simple-icons)
@@ -227,7 +236,16 @@ class Chat(Gtk.Window):
         DATOS.mkdir(parents=True, exist_ok=True)
         gestor = WebKit2.WebsiteDataManager(base_data_directory=str(DATOS / "datos"),
                                             base_cache_directory=str(DATOS / "cache"))
-        ctx = WebKit2.WebContext.new_with_website_data_manager(gestor)
+        try:  # WebKitGTK >= 2.34: liberar memoria al acercarse a MEMORIA_MB
+            presion = WebKit2.MemoryPressureSettings.new()
+            presion.set_memory_limit(MEMORIA_MB)
+            presion.set_strict_threshold(0.8)         # desde ~820 MB: limpieza agresiva
+            presion.set_conservative_threshold(0.5)   # desde ~512 MB: limpieza suave (debe ir después)
+            ctx = WebKit2.WebContext(website_data_manager=gestor, memory_pressure_settings=presion)
+        except (AttributeError, TypeError):
+            ctx = WebKit2.WebContext.new_with_website_data_manager(gestor)
+        # sin caché grande en memoria: lo ya visto se relee de la caché en disco
+        ctx.set_cache_model(WebKit2.CacheModel.DOCUMENT_VIEWER)
         ctx.get_cookie_manager().set_persistent_storage(
             str(DATOS / "cookies.sqlite"), WebKit2.CookiePersistentStorage.SQLITE)
         ctx.set_spell_checking_enabled(True)
@@ -486,7 +504,7 @@ class Burbuja(Gtk.Window):
         self._presion = None
         self._arrastrando = False
         self.chat = Chat(self._set_no_leidos)
-        self.chat.al_cambiar_estado = self.queue_draw
+        self.chat.al_cambiar_estado = self._chat_cambio
         self._ultima_pos = None
 
         self.add_events(Gdk.EventMask.BUTTON_PRESS_MASK | Gdk.EventMask.BUTTON_RELEASE_MASK
@@ -501,8 +519,9 @@ class Burbuja(Gtk.Window):
         self.connect("configure-event", self.al_configurar)
         self.connect("realize", self._forma_circular)
         self.connect("destroy", Gtk.main_quit)
-        self.chat.connect("show", lambda *_: self.queue_draw())
-        self.chat.connect("hide", lambda *_: self.queue_draw())
+        self.chat.connect("show", lambda *_: self._chat_cambio())
+        self.chat.connect("hide", lambda *_: self._chat_cambio())
+        self.chat.connect("configure-event", lambda *_: self._chat_cambio() or False)
 
         self.move(*self._posicion_inicial())
         self.show_all()
@@ -583,6 +602,32 @@ class Burbuja(Gtk.Window):
         mons = [pantalla.get_monitor(i).get_workarea() for i in range(pantalla.get_n_monitors())]
         mon = max(mons, key=lambda m: m.x)
         return mon.x + mon.width - TAM - MARGEN, mon.y + mon.height - 2 * TAM - 3 * MARGEN
+
+    def _chat_cambio(self):
+        self.queue_draw()
+        # tras mover/redimensionar, la posición nueva del chat llega después
+        if not getattr(self, "_revision", None):
+            self._revision = GLib.idle_add(self._revisar_solape)
+
+    def _revisar_solape(self):
+        """Si el chat abierto queda debajo de la burbuja (p. ej. maximizado o en
+        pantalla completa), la burbuja se oculta para no tapar Slack; vuelve al cerrarlo."""
+        self._revision = None
+        if self.get_visible():
+            self._pos_visible = self.get_position()
+        bx, by = getattr(self, "_pos_visible", None) or self.get_position()
+        c = self.chat
+        tapa = False
+        if c.get_visible() and not c.minimizado:
+            cx, cy = c.get_position()
+            cw, ch = c.get_size()
+            tapa = bx < cx + cw and cx < bx + TAM and by < cy + ch and cy < by + TAM
+        if tapa and self.get_visible():
+            self.hide()
+        elif not tapa and not self.get_visible():
+            self.move(bx, by)
+            self.show()
+        return False
 
     def _monitor_actual(self):
         x, y = self.get_position()

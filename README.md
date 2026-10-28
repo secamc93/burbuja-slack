@@ -13,11 +13,14 @@ Proyecto hermano de [burbuja-wa](https://github.com/secamc93/burbuja-wa) (WhatsA
   - Clic: abre Slack / lo trae al frente / lo oculta.
   - Arrastrar: mueve la burbuja (la ventana abierta la sigue).
   - Clic derecho: menú (abrir, siempre encima, recargar, salir).
+  - Se oculta sola si la ventana de Slack queda encima de ella (maximizada o en
+    pantalla completa) y vuelve al cerrarla, minimizarla o moverla.
 - **Ventana** sin bordes del sistema, con esquinas redondeadas y barra propia:
   - Arrastrar la barra: mover. Doble clic: maximizar / restaurar.
   - Bordes y esquinas: redimensionar.
   - Botones: alejar, acercar, recargar, siempre encima, minimizar, maximizar, ocultar.
   - Recuerda posición, tamaño, zoom y "siempre encima".
+- Límite de memoria de WebKit (`MEMORIA_MB`, 1 GB): pasado ese uso libera memoria.
 - Notificaciones de escritorio, micrófono y cámara, descargas a `~/Descargas`.
 - Pegar imágenes con `Ctrl+V` o clic derecho > Pegar imagen (WebKitGTK no lo hace solo).
 - Los enlaces de los mensajes se abren en el navegador; el inicio de sesión

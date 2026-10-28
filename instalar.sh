@@ -14,7 +14,7 @@ if ((${#sudo_falta[@]})); then
   sudo apt install -y "${sudo_falta[@]}"
 fi
 
-mkdir -p ~/.local/bin ~/.config/autostart
+mkdir -p ~/.local/bin ~/.config/autostart ~/.local/share/applications
 ln -sf "$DIR/burbuja-slack" ~/.local/bin/burbuja-slack
 
 cat > ~/.config/autostart/burbuja-slack.desktop <<DESK
@@ -27,6 +27,24 @@ Icon=$DIR/assets/slack-icono.svg
 X-GNOME-Autostart-enabled=true
 X-GNOME-Autostart-Delay=3
 DESK
+
+# lanzador en el menú de aplicaciones y en el dock
+cat > ~/.local/share/applications/burbuja-slack.desktop <<DESK
+[Desktop Entry]
+Type=Application
+Name=Burbuja Slack
+Comment=Burbuja flotante con Slack web propio
+Exec=$HOME/.local/bin/burbuja-slack --toggle
+Icon=$DIR/assets/slack-icono.svg
+StartupWMClass=BurbujaSlack
+Categories=Network;InstantMessaging;
+Terminal=false
+DESK
+FAV=$(gsettings get org.gnome.shell favorite-apps)
+if [[ $FAV != *"burbuja-slack.desktop"* ]]; then
+  if [[ $FAV == "@as []" || $FAV == "[]" ]]; then FAV="['burbuja-slack.desktop']"; else FAV="${FAV%]}, 'burbuja-slack.desktop']"; fi
+  gsettings set org.gnome.shell favorite-apps "$FAV"
+fi
 
 # atajo Super+K -> burbuja-slack --toggle
 BASE=org.gnome.settings-daemon.plugins.media-keys
