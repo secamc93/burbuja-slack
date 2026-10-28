@@ -10,6 +10,7 @@ Un solo proceso: la burbuja + una ventana con Slack web (WebKitGTK).
 - Los no leídos aparecen en la burbuja (número, o un punto si Slack no da número).
 - `burbuja-slack --toggle` (atajo Super+K): igual que hacer clic.
 """
+import base64
 import datetime
 import json
 import os
@@ -22,9 +23,12 @@ import gi
 
 gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
-gi.require_version("WebKit2", "4.0")
+try:
+    gi.require_version("WebKit2", "4.1")  # Ubuntu 24.04+
+except ValueError:
+    gi.require_version("WebKit2", "4.0")  # Ubuntu 22.04
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gdk, GdkPixbuf, GLib, Gtk, WebKit2  # noqa: E402
+from gi.repository import Gdk, GdkPixbuf, Gio, GLib, Gtk, WebKit2  # noqa: E402
 
 TAM = 60                  # diámetro de la burbuja
 CHAT_ANCHO, CHAT_ALTO = 520, 720
@@ -43,6 +47,16 @@ UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
 CONFIG = Path.home() / ".config/burbuja-slack"
 DATOS = Path.home() / ".local/share/burbuja-slack"
 ESTADO = CONFIG / "estado.json"
+# Pega una imagen (PNG en base64) en el elemento activo de Slack.
+PEGAR_JS = """(function (b64) {
+  const bin = atob(b64), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const dt = new DataTransfer();
+  dt.items.add(new File([bytes], "imagen.png", {type: "image/png"}));
+  const destino = document.activeElement || document.body;
+  destino.dispatchEvent(new ClipboardEvent("paste",
+    {clipboardData: dt, bubbles: true, cancelable: true}));
+})(%s);"""
 ASSETS = Path(__file__).resolve().parent / "assets"
 LOGO = ASSETS / "slack.svg"           # logo de Slack en blanco (simple-icons)
 LOGO_APP = ASSETS / "slack-icono.svg" # logo sobre círculo morado, para la ventana
@@ -127,6 +141,11 @@ class Chat(Gtk.Window):
         barra.connect("button-press-event", self._al_presionar_barra)
 
         self.web = self._crear_web()
+        # el menú de clic derecho no puede esperar al portapapeles: se sigue su estado aquí
+        self._imagen_copiada = False
+        portapapeles = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        portapapeles.connect("owner-change", lambda p, _e: p.request_targets(self._al_portapapeles))
+        portapapeles.request_targets(self._al_portapapeles)
         interior = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         interior.pack_start(barra, False, False, 0)
         interior.pack_start(self.web, True, True, 0)
@@ -242,6 +261,7 @@ class Chat(Gtk.Window):
         web.connect("show-notification", self._al_notificar)
         web.connect("decide-policy", self._al_decidir)
         web.connect("create", self._al_crear)
+        web.connect("context-menu", self._al_menu)
         web.connect("notify::title", self._al_titulo)
         web.set_zoom_level(leer_estado().get("zoom", ZOOM))
         web.load_uri(URL)
@@ -264,7 +284,7 @@ class Chat(Gtk.Window):
         # Slack pone "N new items" en el título, o "*" / "!" al inicio si hay
         # no leídos / menciones; -1 = hay algo pero sin número
         titulo = web.get_title() or ""
-        m = re.search(r"(\d+) (new item|nuevo elemento|elemento nuevo)", titulo) or re.match(r"\((\d+)\)", titulo)
+        m = re.search(r"(\d+) (new items?|elementos? nuevos?|nuevos? elementos?)", titulo) or re.match(r"\((\d+)\)", titulo)
         self.al_cambiar_no_leidos(int(m.group(1)) if m else -1 if titulo[:1] in "*!" and titulo else 0)
 
     @staticmethod
@@ -315,8 +335,53 @@ class Chat(Gtk.Window):
             self.zoom(None)
         elif ctrl and ev.keyval == Gdk.KEY_r or ev.keyval == Gdk.KEY_F5:
             self.web.reload()
+        elif (ctrl and ev.keyval in (Gdk.KEY_v, Gdk.KEY_V)) or \
+                (ev.state & Gdk.ModifierType.SHIFT_MASK and ev.keyval == Gdk.KEY_Insert):
+            return self._pegar_imagen()
         else:
             return False
+        return True
+
+    @staticmethod
+    def _hay_imagen():
+        """True si el portapapeles tiene una imagen y no texto."""
+        portapapeles = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        return not portapapeles.wait_is_text_available() and portapapeles.wait_is_image_available()
+
+    def _al_portapapeles(self, _p, destinos, *_):
+        destinos = destinos or []
+        self._imagen_copiada = (Gtk.targets_include_image(destinos, True)
+                                and not Gtk.targets_include_text(destinos))
+
+    def _al_menu(self, _web, menu, _ev, hit):
+        """Clic derecho > Pegar: con una imagen en el portapapeles, usa _pegar_imagen."""
+        if not hit.context_is_editable() or not self._imagen_copiada:
+            return False
+        accion = Gio.SimpleAction.new("pegar-imagen", None)
+        accion.connect("activate", lambda *_: self._pegar_imagen())
+        nuevo = WebKit2.ContextMenuItem.new_from_gaction(accion, "Pegar imagen", None)
+        for i, item in enumerate(menu.get_items()):
+            if item.get_stock_action() == WebKit2.ContextMenuAction.PASTE:
+                menu.remove(item)
+                menu.insert(nuevo, i)
+                break
+        else:
+            menu.prepend(nuevo)
+        return False
+
+    def _pegar_imagen(self):
+        """WebKitGTK no pasa imágenes del portapapeles a la página: si hay una
+        imagen (y no texto), se la entregamos a Slack como un evento de pegado."""
+        if not self._hay_imagen():
+            return False  # pegado normal de WebKit
+        imagen = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).wait_for_image()
+        if imagen is None:
+            return False
+        ok, datos = imagen.save_to_bufferv("png", [], [])
+        if not ok:
+            return False
+        b64 = base64.b64encode(datos).decode()
+        self.web.run_javascript(PEGAR_JS % json.dumps(b64), None, None, None)
         return True
 
     def zoom(self, cambio):

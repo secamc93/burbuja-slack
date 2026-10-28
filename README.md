@@ -19,6 +19,7 @@ Proyecto hermano de [burbuja-wa](https://github.com/secamc93/burbuja-wa) (WhatsA
   - Botones: alejar, acercar, recargar, siempre encima, minimizar, maximizar, ocultar.
   - Recuerda posición, tamaño, zoom y "siempre encima".
 - Notificaciones de escritorio, micrófono y cámara, descargas a `~/Descargas`.
+- Pegar imágenes con `Ctrl+V` o clic derecho > Pegar imagen (WebKitGTK no lo hace solo).
 - Los enlaces de los mensajes se abren en el navegador; el inicio de sesión
   (Google / SSO) se hace dentro de la ventana.
 
@@ -37,7 +38,7 @@ Proyecto hermano de [burbuja-wa](https://github.com/secamc93/burbuja-wa) (WhatsA
 burbuja-slack
 ```
 
-Requiere `python3-gi`, `python3-gi-cairo` y `gir1.2-webkit2-4.0` (Ubuntu 22.04).
+Requiere `python3-gi`, `python3-gi-cairo` y `gir1.2-webkit2-4.1` (Ubuntu 24.04) o `gir1.2-webkit2-4.0` (Ubuntu 22.04).
 La primera vez hay que iniciar sesión en el espacio de trabajo.
 
 ## Notas
